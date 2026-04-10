@@ -43,8 +43,9 @@ export default function ImportPage() {
     }
     try {
       await importFile(file, apiKey)
-      if (useImportStore.getState().jobId) {
-        navigate(`/import/${useImportStore.getState().jobId}`, { replace: true })
+      const personaId = useImportStore.getState().personaId
+      if (personaId) {
+        navigate(`/import/${personaId}`, { replace: true })
       }
     } catch (e: any) {
       Toast.show(e.message)

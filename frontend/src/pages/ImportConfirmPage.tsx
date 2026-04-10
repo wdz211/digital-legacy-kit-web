@@ -1,24 +1,43 @@
 // -*- coding: utf-8 -*-
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { NavBar, Button, Input, Toast, Tag } from 'antd-mobile'
 import { useImportStore, usePersonaStore, useSettingsStore } from '../stores'
+import type { Persona, ExtractedPersona } from '../stores'
 
 export default function ImportConfirmPage() {
-  useParams()
+  const { persona_id } = useParams<{ persona_id: string }>()
   const navigate = useNavigate()
   const { preview, reset } = useImportStore()
-  const { createPersona } = usePersonaStore()
+  const { fetchPersonaById, patchPersona } = usePersonaStore()
   const { getDefaultKey, saveApiKey } = useSettingsStore()
 
   const [name, setName] = useState(preview?.contact_name || '')
   const [description, setDescription] = useState('')
   const [isCreating, setIsCreating] = useState(false)
   const [apiKeyInput, setApiKeyInput] = useState('')
-
+  const [extracted, setExtracted] = useState<ExtractedPersona | null>(null)
+  const [messageCount, setMessageCount] = useState(0)
   const apiKey = getDefaultKey()
 
-  if (!preview) {
+  // Load persona data when navigating directly to this page
+  useEffect(() => {
+    if (!preview && persona_id) {
+      fetchPersonaById(persona_id)
+        .then((p: Persona) => {
+          setName(p.name)
+          setDescription(p.description || '')
+          setExtracted(p.extracted_persona || null)
+          setMessageCount(p.message_count || 0)
+        })
+        .catch(() => Toast.show('加载失败，请重试'))
+    } else if (preview) {
+      setExtracted(preview.extracted_persona)
+      setMessageCount(preview.message_count)
+    }
+  }, [persona_id])
+
+  if (!preview && !persona_id) {
     return (
       <div style={{ minHeight: '100vh', background: '#f5f5f5' }}>
         <NavBar onBack={() => { reset(); navigate('/import') }}>导入结果</NavBar>
@@ -29,9 +48,7 @@ export default function ImportConfirmPage() {
     )
   }
 
-  const { extracted_persona, contact_name, message_count } = preview
-
-  const handleCreate = async () => {
+  const handleConfirm = async () => {
     if (!name.trim()) {
       Toast.show('请输入克隆体名称')
       return
@@ -40,7 +57,6 @@ export default function ImportConfirmPage() {
       Toast.show('请配置 API Key')
       return
     }
-    // Save key if manually entered
     if (apiKeyInput && !apiKey) {
       const [type, ...rest] = apiKeyInput.split(':')
       if (rest.length > 0) {
@@ -49,14 +65,13 @@ export default function ImportConfirmPage() {
     }
     setIsCreating(true)
     try {
-      const persona = await createPersona({
+      const targetId = persona_id || useImportStore.getState().personaId
+      await patchPersona(targetId!, {
         name: name.trim(),
-        description: description || extracted_persona?.description || '',
-        extracted_persona: extracted_persona,
-        chat_data: { contact_name, message_count, source: 'xlsx' },
+        description: description || extracted?.description || '',
       })
       reset()
-      navigate(`/chat/${persona.persona_id}`, { replace: true })
+      navigate(`/chat/${targetId}`, { replace: true })
     } catch (e: any) {
       Toast.show(e.message)
     } finally {
@@ -86,7 +101,7 @@ export default function ImportConfirmPage() {
           <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder={extracted_persona?.description || '描述这个克隆体...'}
+            placeholder={extracted?.description || '描述这个克隆体...'}
             rows={3}
             style={{
               width: '100%', border: 'none', resize: 'none', outline: 'none',
@@ -96,36 +111,37 @@ export default function ImportConfirmPage() {
         </div>
 
         {/* Extracted info */}
-        <div style={{ background: '#fff', borderRadius: '10px', padding: '14px 16px' }}>
-          <div style={{ fontSize: '13px', color: '#999', marginBottom: '10px' }}>LLM 提取结果</div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '14px' }}>
-            <div>
-              <span style={{ color: '#666' }}>语言风格：</span>
-              <span>{extracted_persona?.language_style || '-'}</span>
-            </div>
-            <div>
-              <span style={{ color: '#666' }}>性格特征：</span>
-              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '4px' }}>
-                {(extracted_persona?.personality_traits || []).map((t, i) => (
-                  <Tag key={i} color="primary">{t}</Tag>
-                ))}
+        {extracted && (
+          <div style={{ background: '#fff', borderRadius: '10px', padding: '14px 16px' }}>
+            <div style={{ fontSize: '13px', color: '#999', marginBottom: '10px' }}>LLM 提取结果</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '14px' }}>
+              <div>
+                <span style={{ color: '#666' }}>语言风格：</span>
+                <span>{extracted.language_style || '-'}</span>
+              </div>
+              <div>
+                <span style={{ color: '#666' }}>性格特征：</span>
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '4px' }}>
+                  {(extracted.personality_traits || []).map((t, i) => (
+                    <Tag key={i} color="primary">{t}</Tag>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <span style={{ color: '#666' }}>常用口头禅：</span>
+                <span>{(extracted.common_phrases || []).join('、')}</span>
+              </div>
+              <div>
+                <span style={{ color: '#666' }}>话题偏好：</span>
+                <span>{(extracted.topics || []).join('、')}</span>
+              </div>
+              <div>
+                <span style={{ color: '#666' }}>消息数量：</span>
+                <span>{messageCount.toLocaleString()} 条</span>
               </div>
             </div>
-            <div>
-              <span style={{ color: '#666' }}>常用口头禅：</span>
-              <span>{(extracted_persona?.common_phrases || []).join('、')}</span>
-            </div>
-            <div>
-              <span style={{ color: '#666' }}>话题偏好：</span>
-              <span>{(extracted_persona?.topics || []).join('、')}</span>
-            </div>
-            <div>
-              <span style={{ color: '#666' }}>消息数量：</span>
-              <span>{message_count.toLocaleString()} 条</span>
-            </div>
           </div>
-        </div>
+        )}
 
         {/* API Key */}
         <div style={{ background: '#fff', borderRadius: '10px', padding: '14px 16px' }}>
@@ -136,14 +152,12 @@ export default function ImportConfirmPage() {
               <span onClick={() => navigate('/settings')} style={{ color: '#1677ff', fontSize: '13px', cursor: 'pointer' }}>更换</span>
             </div>
           ) : (
-            <div>
-              <Input
-                placeholder="sk-... (手动输入 Key)"
-                value={apiKeyInput}
-                onChange={setApiKeyInput}
-                style={{ '--font-size': '14px' } as any}
-              />
-            </div>
+            <Input
+              placeholder="sk-... (手动输入 Key)"
+              value={apiKeyInput}
+              onChange={setApiKeyInput}
+              style={{ '--font-size': '14px' } as any}
+            />
           )}
         </div>
 
@@ -152,7 +166,7 @@ export default function ImportConfirmPage() {
           color="primary"
           size="large"
           loading={isCreating}
-          onClick={handleCreate}
+          onClick={handleConfirm}
         >
           确认创建克隆体
         </Button>

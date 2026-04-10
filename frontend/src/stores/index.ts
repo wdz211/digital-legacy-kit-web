@@ -2,7 +2,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
-const API_BASE = (import.meta as any).env?.VITE_API_BASE || '/api/v1'
+const API_BASE = (import.meta as any).env?.VITE_API_BASE || ''
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -66,26 +66,25 @@ export const useAuthStore = create<AuthState>()(
       error: null,
 
       sendCode: async (phone: string) => {
-        const res = await fetch(`${API_BASE}/auth/send_code`, {
+        const res = await fetch(`${API_BASE}/api/auth`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ phone }),
+          body: JSON.stringify({ action: 'send_code', phone }),
         })
         const data = await res.json()
-        if (!res.ok) throw new Error(data.detail || '发送失败')
-        return
+        if (!res.ok) throw new Error(data.error || '发送失败')
       },
 
       login: async (phone: string, code: string) => {
         set({ isLoading: true, error: null })
         try {
-          const res = await fetch(`${API_BASE}/auth/login`, {
+          const res = await fetch(`${API_BASE}/api/auth`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ phone, code }),
+            body: JSON.stringify({ action: 'login', phone, code }),
           })
           const data = await res.json()
-          if (!res.ok) throw new Error(data.detail || '登录失败')
+          if (!res.ok) throw new Error(data.error || '登录失败')
           set({ token: data.token, user: { user_id: data.user_id, phone } })
         } catch (e: any) {
           set({ error: e.message })
@@ -98,13 +97,13 @@ export const useAuthStore = create<AuthState>()(
       loginPassword: async (phone: string, password: string) => {
         set({ isLoading: true, error: null })
         try {
-          const res = await fetch(`${API_BASE}/auth/login_password`, {
+          const res = await fetch(`${API_BASE}/api/auth`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ phone, password }),
+            body: JSON.stringify({ action: 'login_password', phone, password }),
           })
           const data = await res.json()
-          if (!res.ok) throw new Error(data.detail || '登录失败')
+          if (!res.ok) throw new Error(data.error || '登录失败')
           set({ token: data.token, user: { user_id: data.user_id, phone } })
         } catch (e: any) {
           set({ error: e.message })
@@ -114,10 +113,7 @@ export const useAuthStore = create<AuthState>()(
         }
       },
 
-      logout: () => {
-        set({ token: null, user: null })
-      },
-
+      logout: () => set({ token: null, user: null }),
       clearError: () => set({ error: null }),
     }),
     { name: 'dlk_auth' }
@@ -131,14 +127,15 @@ interface PersonaState {
   isLoading: boolean
   error: string | null
   loadPersonas: () => Promise<void>
+  fetchPersonaById: (persona_id: string) => Promise<Persona>
   createPersona: (data: {
     name: string
     description?: string
     extracted_persona?: ExtractedPersona
     chat_data?: any
-  }) => Promise<Persona>
-  deletePersona: (persona_id: string) => Promise<void>
+  }) => Promise<{ persona_id: string; name: string }>
   patchPersona: (persona_id: string, data: Partial<Persona>) => Promise<void>
+  deletePersona: (persona_id: string) => Promise<void>
 }
 
 export const usePersonaStore = create<PersonaState>((set, get) => ({
@@ -151,11 +148,11 @@ export const usePersonaStore = create<PersonaState>((set, get) => ({
     if (!token) return
     set({ isLoading: true })
     try {
-      const res = await fetch(`${API_BASE}/personas`, {
+      const res = await fetch(`${API_BASE}/api/personas`, {
         headers: { Authorization: `Bearer ${token}` },
       })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.detail)
+      if (!res.ok) throw new Error(data.error)
       set({ personas: data.personas || [] })
     } catch (e: any) {
       set({ error: e.message })
@@ -164,9 +161,19 @@ export const usePersonaStore = create<PersonaState>((set, get) => ({
     }
   },
 
+  fetchPersonaById: async (persona_id: string) => {
+    const token = useAuthStore.getState().token!
+    const res = await fetch(`${API_BASE}/api/persona/${persona_id}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || '加载失败')
+    return data as Persona
+  },
+
   createPersona: async (data) => {
     const token = useAuthStore.getState().token!
-    const res = await fetch(`${API_BASE}/personas`, {
+    const res = await fetch(`${API_BASE}/api/personas`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -175,27 +182,14 @@ export const usePersonaStore = create<PersonaState>((set, get) => ({
       body: JSON.stringify(data),
     })
     const json = await res.json()
-    if (!res.ok) throw new Error(json.detail || '创建失败')
+    if (!res.ok) throw new Error(json.error || '创建失败')
     await get().loadPersonas()
     return json
   },
 
-  deletePersona: async (persona_id: string) => {
-    const token = useAuthStore.getState().token!
-    const res = await fetch(`${API_BASE}/personas/${persona_id}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    if (!res.ok) {
-      const json = await res.json()
-      throw new Error(json.detail || '删除失败')
-    }
-    await get().loadPersonas()
-  },
-
   patchPersona: async (persona_id: string, data: Partial<Persona>) => {
     const token = useAuthStore.getState().token!
-    const res = await fetch(`${API_BASE}/personas/${persona_id}`, {
+    const res = await fetch(`${API_BASE}/api/persona/${persona_id}`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
@@ -205,37 +199,39 @@ export const usePersonaStore = create<PersonaState>((set, get) => ({
     })
     if (!res.ok) {
       const json = await res.json()
-      throw new Error(json.detail || '更新失败')
+      throw new Error(json.error || '更新失败')
+    }
+    await get().loadPersonas()
+  },
+
+  deletePersona: async (persona_id: string) => {
+    const token = useAuthStore.getState().token!
+    const res = await fetch(`${API_BASE}/api/persona/${persona_id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    if (!res.ok) {
+      const json = await res.json()
+      throw new Error(json.error || '删除失败')
     }
     await get().loadPersonas()
   },
 }))
 
-// ── Chat Store ────────────────────────────────────────────────────────────────
+// ── Chat Store ───────────────────────────────────────────────────────────────
 
 interface ChatState {
   messages: Message[]
   isStreaming: boolean
   error: string | null
-  loadHistory: (persona_id: string) => Promise<void>
   sendMessage: (persona_id: string, content: string, apiKey: ApiKey) => Promise<string>
-  clearHistory: (persona_id: string) => Promise<void>
+  clearMessages: () => void
 }
 
 export const useChatStore = create<ChatState>((set) => ({
   messages: [],
   isStreaming: false,
   error: null,
-
-  loadHistory: async (persona_id: string) => {
-    const token = useAuthStore.getState().token!
-    const res = await fetch(`${API_BASE}/chat/history/${persona_id}?limit=100`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    const data = await res.json()
-    if (!res.ok) throw new Error(data.detail)
-    set({ messages: data.messages || [] })
-  },
 
   sendMessage: async (persona_id: string, content: string, apiKey: ApiKey) => {
     const token = useAuthStore.getState().token!
@@ -246,7 +242,7 @@ export const useChatStore = create<ChatState>((set) => ({
     }))
 
     try {
-      const res = await fetchWithStream(`${API_BASE}/chat/stream`, {
+      const res = await fetchWithStream(`${API_BASE}/api/chat/stream`, {
         persona_id,
         user_input: content,
         api_type: apiKey.type,
@@ -273,14 +269,7 @@ export const useChatStore = create<ChatState>((set) => ({
     }
   },
 
-  clearHistory: async (persona_id: string) => {
-    const token = useAuthStore.getState().token!
-    await fetch(`${API_BASE}/chat/history/${persona_id}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    set({ messages: [] })
-  },
+  clearMessages: () => set({ messages: [] }),
 }))
 
 // ── Import Store ─────────────────────────────────────────────────────────────
@@ -293,7 +282,7 @@ interface ImportPreview {
 
 interface ImportState {
   preview: ImportPreview | null
-  jobId: string | null
+  personaId: string | null
   isLoading: boolean
   progress: string
   error: string | null
@@ -303,7 +292,7 @@ interface ImportState {
 
 export const useImportStore = create<ImportState>((set) => ({
   preview: null,
-  jobId: null,
+  personaId: null,
   isLoading: false,
   progress: '',
   error: null,
@@ -320,23 +309,27 @@ export const useImportStore = create<ImportState>((set) => ({
 
     set({ progress: '解析聊天记录...' })
 
-    const res = await fetch(`${API_BASE}/import`, {
+    const res = await fetch(`${API_BASE}/api/import`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}` },
       body: formData,
     })
 
     const data = await res.json()
-    if (!res.ok) throw new Error(data.detail || '导入失败')
+    if (!res.ok) throw new Error(data.error || data.message || '导入失败')
 
     set({
-      preview: data.preview,
-      jobId: data.job_id,
+      preview: {
+        contact_name: data.contact_name,
+        message_count: data.message_count,
+        extracted_persona: data.extracted_persona,
+      },
+      personaId: data.persona_id,
       progress: '提取完成',
     })
   },
 
-  reset: () => set({ preview: null, jobId: null, isLoading: false, progress: '', error: null }),
+  reset: () => set({ preview: null, personaId: null, isLoading: false, progress: '', error: null }),
 }))
 
 // ── Settings Store (API Keys in localStorage) ─────────────────────────────────
@@ -403,8 +396,8 @@ async function fetchWithStream(
   })
 
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: '请求失败' }))
-    throw new Error(err.detail)
+    const err = await res.json().catch(() => ({ error: '请求失败' }))
+    throw new Error(err.error)
   }
 
   const reader = res.body!.getReader()
@@ -421,7 +414,7 @@ async function fetchWithStream(
     for (const line of lines) {
       if (!line.startsWith('data: ')) continue
       const data = line.slice(6).trim()
-      if (data === '') continue
+      if (!data) continue
 
       try {
         const parsed = JSON.parse(data)

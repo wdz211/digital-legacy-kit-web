@@ -21,15 +21,11 @@ export default function ChatPage() {
   const [input, setInput] = useState('')
   const [showMenu, setShowMenu] = useState(false)
 
-  const { messages, loadHistory, sendMessage, clearHistory, isStreaming } = useChatStore()
+  const { messages, sendMessage, clearMessages, isStreaming } = useChatStore()
   const { personas, deletePersona } = usePersonaStore()
   const { getDefaultKey } = useSettingsStore()
 
   const persona = personas.find((p) => p.persona_id === persona_id)
-
-  useEffect(() => {
-    if (persona_id) loadHistory(persona_id)
-  }, [persona_id])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -57,7 +53,7 @@ export default function ChatPage() {
       title: '清空对话',
       content: '确定清空所有对话记录？',
       onConfirm: async () => {
-        await clearHistory(persona_id!)
+        await clearMessages()
         Toast.show('已清空')
       },
     })

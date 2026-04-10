@@ -1,35 +1,35 @@
-# api/auth/route.py — POST /api/auth/send_code, POST /api/auth/login, POST /api/auth/login_password, POST /api/auth/register_password
+# api/auth/route.py — All auth endpoints: POST /api/auth
+# Action in body: send_code | login | login_password | register_password
 import json
 import random
 import re
 from datetime import datetime, timedelta
+from starlette.requests import Request
 from starlette.responses import JSONResponse
 from .._shared.db import get_cursor
-from .._shared.models import SendCodeRequest, LoginRequest, PasswordLoginRequest
 from .._shared.auth import create_token
 
-def POST(request):
-    path = request.headers.get("x-path", request.headers.get("path", ""))
-    # Vercel passes full path; handle both /api/auth/send_code and /api/auth
-    sub = path.rsplit("/auth/", 1)[-1] if "/auth/" in path else ""
-
-    if sub == "send_code" or path == "/api/auth/send_code":
-        return _send_code(request)
-    elif sub == "login" or path == "/api/auth/login":
-        return _login(request)
-    elif sub == "login_password" or path == "/api/auth/login_password":
-        return _login_password(request)
-    elif sub == "register_password" or path == "/api/auth/register_password":
-        return _register_password(request)
-    return JSONResponse({"error": "not found"}, status_code=404)
-
-def _send_code(request):
+def POST(request: Request):
     try:
         body = json.loads(request.body.decode())
-        phone = body.get("phone", "")
     except:
         return JSONResponse({"error": "invalid json"}, status_code=400)
 
+    action = body.get("action", "")
+
+    if action == "send_code":
+        return _send_code(body)
+    elif action == "login":
+        return _login(body)
+    elif action == "login_password":
+        return _login_password(body)
+    elif action == "register_password":
+        return _register_password(body)
+    return JSONResponse({"error": "unknown action"}, status_code=400)
+
+
+def _send_code(body: dict):
+    phone = body.get("phone", "")
     if not re.match(r"^1[3-9]\d{9}$", phone):
         return JSONResponse({"error": "手机号格式错误"}, status_code=400)
 
@@ -44,21 +44,13 @@ def _send_code(request):
             (phone, code, now.isoformat(), expires.isoformat())
         )
 
-    # In production, integrate with SMS provider (e.g., twilio, aliyun)
     print(f"[DEV] Verification code for {phone}: {code}")
-    return JSONResponse({
-        "success": True,
-        "message": "验证码已发送（开发环境打印到日志）",
-        "dev_code": code  # 移除！
-    })
+    return JSONResponse({"success": True, "dev_code": code})
 
-def _login(request):
-    try:
-        body = json.loads(request.body.decode())
-        phone = body.get("phone", "")
-        code = body.get("code", "")
-    except:
-        return JSONResponse({"error": "invalid json"}, status_code=400)
+
+def _login(body: dict):
+    phone = body.get("phone", "")
+    code = body.get("code", "")
 
     if not phone or not code:
         return JSONResponse({"error": "手机号和验证码必填"}, status_code=400)
@@ -83,7 +75,8 @@ def _login(request):
         c.execute("SELECT id FROM users WHERE phone=?", (phone,))
         user = c.fetchone()
         if not user:
-            c.execute("INSERT INTO users (phone, created_at) VALUES (?, ?)", (phone, datetime.utcnow().isoformat()))
+            c.execute("INSERT INTO users (phone, created_at) VALUES (?, ?)",
+                       (phone, datetime.utcnow().isoformat()))
             user_id = c.lastrowid
         else:
             user_id = user["id"]
@@ -91,13 +84,10 @@ def _login(request):
     token = create_token(user_id, phone)
     return JSONResponse({"token": token, "user_id": user_id})
 
-def _login_password(request):
-    try:
-        body = json.loads(request.body.decode())
-        phone = body.get("phone", "")
-        password = body.get("password", "")
-    except:
-        return JSONResponse({"error": "invalid json"}, status_code=400)
+
+def _login_password(body: dict):
+    phone = body.get("phone", "")
+    password = body.get("password", "")
 
     if not phone or not password:
         return JSONResponse({"error": "手机号和密码必填"}, status_code=400)
@@ -115,13 +105,10 @@ def _login_password(request):
     token = create_token(user_id, phone)
     return JSONResponse({"token": token, "user_id": user_id})
 
-def _register_password(request):
-    try:
-        body = json.loads(request.body.decode())
-        phone = body.get("phone", "")
-        password = body.get("password", "")
-    except:
-        return JSONResponse({"error": "invalid json"}, status_code=400)
+
+def _register_password(body: dict):
+    phone = body.get("phone", "")
+    password = body.get("password", "")
 
     if not re.match(r"^1[3-9]\d{9}$", phone):
         return JSONResponse({"error": "手机号格式错误"}, status_code=400)

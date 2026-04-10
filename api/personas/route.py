@@ -1,11 +1,15 @@
 # api/personas/route.py — GET /api/personas, POST /api/personas
-import json
-from datetime import datetime
-from starlette.responses import JSONResponse
+from fastapi import APIRouter
+from fastapi.responses import JSONResponse
 from .._shared.db import get_cursor
 from .._shared.auth import get_current_user
+import json
+from datetime import datetime
 
-def GET(request):
+router = APIRouter()
+
+@router.get("/personas")
+def list_personas(request):
     try:
         auth = request.headers.get("authorization", "")
         user = get_current_user(auth)
@@ -19,21 +23,17 @@ def GET(request):
         )
         rows = c.fetchall()
 
-    personas = [dict(row) for row in rows]
-    return JSONResponse({"personas": personas})
+    return {"personas": [dict(row) for row in rows]}
 
-def POST(request):
+@router.post("/personas")
+def create_persona(request):
     try:
         auth = request.headers.get("authorization", "")
         user = get_current_user(auth)
     except ValueError as e:
         return JSONResponse({"error": str(e)}, status_code=401)
 
-    try:
-        body = json.loads(request.body.decode())
-    except:
-        return JSONResponse({"error": "invalid json"}, status_code=400)
-
+    body = json.loads(request.body.decode())
     name = body.get("name", "").strip()
     if not name:
         return JSONResponse({"error": "name 必填"}, status_code=400)
@@ -53,4 +53,4 @@ def POST(request):
              datetime.utcnow().isoformat())
         )
 
-    return JSONResponse({"persona_id": persona_id, "name": name}, status_code=201)
+    return {"persona_id": persona_id, "name": name}, 201

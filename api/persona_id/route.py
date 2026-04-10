@@ -1,31 +1,26 @@
 # api/persona_id/route.py — GET/PATCH/DELETE /api/persona/{id}
-import json
-import re
-from starlette.responses import JSONResponse
+from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
 from .._shared.db import get_cursor
 from .._shared.auth import get_current_user
+import json, re
+
+router = APIRouter()
 
 def _extract_id(path: str) -> str:
-    # /api/persona/xxx → xxx
     m = re.search(r"/persona/([\w-]+)", path)
     return m.group(1) if m else ""
 
-def GET(request):
+@router.get("/persona/{persona_id}")
+def get_persona(persona_id: str, request: Request):
     try:
         auth = request.headers.get("authorization", "")
         user = get_current_user(auth)
     except ValueError as e:
         return JSONResponse({"error": str(e)}, status_code=401)
 
-    persona_id = _extract_id(request.headers.get("x-path", request.uri))
-    if not persona_id:
-        return JSONResponse({"error": "persona_id required"}, status_code=400)
-
     with get_cursor() as c:
-        c.execute(
-            "SELECT * FROM personas WHERE persona_id=? AND user_id=?",
-            (persona_id, user["user_id"])
-        )
+        c.execute("SELECT * FROM personas WHERE persona_id=? AND user_id=?", (persona_id, user["user_id"]))
         row = c.fetchone()
 
     if not row:
@@ -34,26 +29,18 @@ def GET(request):
     result = dict(row)
     result["extracted_persona"] = json.loads(result.get("extracted_persona", "{}"))
     result["chat_data"] = json.loads(result.get("chat_data", "{}"))
-    return JSONResponse(result)
+    return result
 
-def PATCH(request):
+@router.patch("/persona/{persona_id}")
+def patch_persona(persona_id: str, request: Request):
     try:
         auth = request.headers.get("authorization", "")
         user = get_current_user(auth)
     except ValueError as e:
         return JSONResponse({"error": str(e)}, status_code=401)
 
-    persona_id = _extract_id(request.headers.get("x-path", request.uri))
-    if not persona_id:
-        return JSONResponse({"error": "persona_id required"}, status_code=400)
-
-    try:
-        body = json.loads(request.body.decode())
-    except:
-        return JSONResponse({"error": "invalid json"}, status_code=400)
-
-    fields = []
-    values = []
+    body = json.loads(request.body.decode())
+    fields, values = [], []
     for field in ("name", "description", "extracted_persona"):
         if field in body:
             fields.append(f"{field}=?")
@@ -71,18 +58,15 @@ def PATCH(request):
         if c.rowcount == 0:
             return JSONResponse({"error": "不存在"}, status_code=404)
 
-    return JSONResponse({"success": True})
+    return {"success": True}
 
-def DELETE(request):
+@router.delete("/persona/{persona_id}")
+def delete_persona(persona_id: str, request: Request):
     try:
         auth = request.headers.get("authorization", "")
         user = get_current_user(auth)
     except ValueError as e:
         return JSONResponse({"error": str(e)}, status_code=401)
-
-    persona_id = _extract_id(request.headers.get("x-path", request.uri))
-    if not persona_id:
-        return JSONResponse({"error": "persona_id required"}, status_code=400)
 
     with get_cursor() as c:
         c.execute("DELETE FROM personas WHERE persona_id=? AND user_id=?", (persona_id, user["user_id"]))
@@ -90,4 +74,4 @@ def DELETE(request):
             return JSONResponse({"error": "不存在"}, status_code=404)
         c.execute("DELETE FROM chat_history WHERE persona_id=?", (persona_id,))
 
-    return JSONResponse({"success": True})
+    return {"success": True}

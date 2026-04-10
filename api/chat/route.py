@@ -1,14 +1,16 @@
 # api/chat/route.py — POST /api/chat/stream
-import json
-import re
-from datetime import datetime
-from starlette.requests import Request
-from starlette.responses import JSONResponse, StreamingResponse
+from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse, StreamingResponse
 from .._shared.db import get_cursor, get_db
 from .._shared.auth import get_current_user
 from .._shared.services import build_dialogue_system_prompt, LLMCaller, LLMCallError
+import json
+from datetime import datetime
 
-def POST(request: Request):
+router = APIRouter()
+
+@router.post("/chat/stream")
+async def chat_stream(request: Request):
     try:
         auth = request.headers.get("authorization", "")
         user = get_current_user(auth)
@@ -43,31 +45,23 @@ def POST(request: Request):
         return JSONResponse({"error": "persona 未完成导入，无法对话"}, status_code=422)
 
     system_prompt = build_dialogue_system_prompt(extracted)
-
     now = datetime.utcnow().isoformat()
+
     with get_cursor() as c:
-        c.execute(
-            "INSERT INTO chat_history (persona_id, role, content, created_at) VALUES (?, ?, ?, ?)",
-            (persona_id, "user", user_input, now)
-        )
-        c.execute(
-            "INSERT INTO chat_history (persona_id, role, content, created_at) VALUES (?, ?, ?, ?)",
-            (persona_id, "assistant", "", now)
-        )
+        c.execute("INSERT INTO chat_history (persona_id, role, content, created_at) VALUES (?, ?, ?, ?)",
+                  (persona_id, "user", user_input, now))
+        c.execute("INSERT INTO chat_history (persona_id, role, content, created_at) VALUES (?, ?, ?, ?)",
+                  (persona_id, "assistant", "", now))
         history_id = c.lastrowid
 
     return StreamingResponse(
         _chat_stream(persona_id, api_type, api_key, model, system_prompt, user_input, history_id),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        }
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 async def _chat_stream(persona_id: str, api_type: str, api_key: str, model: str,
                         system_prompt: str, user_input: str, history_id: int):
-    """Async generator yielding SSE chunks; saves full response to DB on completion."""
     caller = LLMCaller(api_type, api_key, model, timeout=120.0)
     full_response = []
 
@@ -78,10 +72,7 @@ async def _chat_stream(persona_id: str, api_type: str, api_key: str, model: str,
 
         final_text = "".join(full_response)
         conn = get_db()
-        conn.execute(
-            "UPDATE chat_history SET content=? WHERE id=?",
-            (final_text, history_id)
-        )
+        conn.execute("UPDATE chat_history SET content=? WHERE id=?", (final_text, history_id))
         conn.commit()
         conn.close()
 
